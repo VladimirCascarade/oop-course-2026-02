@@ -76,15 +76,6 @@ marketplace
         └── TimeServer
 ```
 
-Please enable [PEP 563 – Postponed Evaluation of Annotations](https://peps.python.org/pep-0563/) by placing the following line at the top of your module imports:
-
-```py
-from __future__ import annotations
-```
-
-PEP 563 will be ultimately superseded by [PEP 649 – Deferred Evaluation Of Annotations Using Descriptors](https://peps.python.org/pep-0649/) in Python 3.14, but for now it fixes some important issues with Python's static type annotations.
-
-
 ## Part 1 - Listings
 
 Implement a `Listing` class responsible for all listing-related functionality.
@@ -324,5 +315,5 @@ Time can be manually moved forward in a test script, allowing listings with real
 
 If you're up for a challenge, you might wish to implement the following additional mechanics.
 
-- Use a [context manager](https://docs.python.org/3/library/contextlib.html#contextlib.contextmanager) to implement protected locks which prevents users from directly instantiating instances of `Buyer`, `Seller`, `Listing` or `BidStack`. This is an example of the [Resource Acquisition Is Initialisation (RAII) idiom](https://en.wikipedia.org/wiki/Resource_acquisition_is_initialization).
+- Use a [context manager](https://docs.python.org/3/library/contextlib.html#contextlib.contextmanager) to implement protected locks which prevents users from directly instantiating instances of `Buyer`, `Seller`, `Listing` or `BidStack`. This is an example of the [Resource Acquisition Is Initialisation (RAII) pattern](https://en.wikipedia.org/wiki/Resource_acquisition_is_initialization).
 - Use the [`json`](https://docs.python.org/3/library/json.html) library to serialise and deserialise data. You might wish to implement the special `__del__` method: this is a finaliser, called before just before an object is about to be garbage collected, allowing you to serialise any outstanding data before it is cleared form memory.
