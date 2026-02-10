@@ -2,10 +2,11 @@
 
 Materials for the Feb 2026 iteration of OOP.
 
-- This week's exercises are in [EXERCISES.md](EXERCISES.md).
+- The specs for the mini-project are in [marketplace.md](marketplace.md), we'll work through it together.
+- Assorted examples are in the [examples](examples/) folder
 - A sample assignment is in [sample-oop-assignment.pdf](sample-oop-assignment.pdf).
 
-The repository for this is: https://github.com/sg495/oop-course-2025-10
+The repository for this is: https://github.com/sg495/oop-course-2026-02
 
 
 ## Some Python books
@@ -33,7 +34,7 @@ You should install the following extensions:
 - the [`Python Debugger` extension](https://marketplace.visualstudio.com/items?itemName=ms-python.debugpy)
 - the [`Mypy Type Checker` extension](https://marketplace.visualstudio.com/items?itemName=ms-python.mypy-type-checker)
 
-A `pyproject.toml` file at the root of this repository instructs Mypy to run in [strict mode](https://mypy.readthedocs.io/en/stable/command_line.html#cmdoption-mypy-strict) using Python 3.13.
+A `pyproject.toml` file at the root of this repository instructs Mypy to run in [strict mode](https://mypy.readthedocs.io/en/stable/command_line.html#cmdoption-mypy-strict) using Python 3.14.
 
 You might have to set the Python language server to `Pylance` in settings.
 You might have to set Auto-Import Completions to true on the language menu in the bottom right of the VS Code window.
@@ -64,6 +65,15 @@ ruff check <module>
 ```py
 ruff format <module>
 ```
+
+I have `mypy 1.19.1`, `black 26.1.0` and `ruff 0.15.0`.
+
+Also worth mentioning are:
+
+- the [`uv` package manager](https://docs.astral.sh/uv/), a stable project superior in most ways to `pip`.
+- the [`ty` static type-checker](https://docs.astral.sh/ty/), a promising alpha stage project.
+
+
 
 ## Naming your local files
 
