@@ -6,8 +6,11 @@ from collections.abc import Hashable, Iterable, Iterator
 from typing import Self
 #    ^^^^^^^^^^^^^^^ stdlib module containing the collection abstract base classes
 
+from collections_abc import IndexOfMixin
 
-class Bag[ItemT: Hashable]:
+
+class Bag[ItemT: Hashable](IndexOfMixin[ItemT]):
+    #                      ^^^^^^^^^^^^^^^^^^^ automatically acquire index_of method
     #            ^^^^^^^^ generic type bound (T must be a sub-type of Hashable)
     #     ^^^^^ generic type parameter for the items in the bag
     """
@@ -76,6 +79,11 @@ class Bag[ItemT: Hashable]:
             self.__counts[item] = count - 1
         self.__len -= 1
 
+    def clear(self, item: ItemT) -> None:
+        """I want to be able to remove all copies of an element from my bag."""
+        if item in self.__counts:
+            del self.__counts[item]
+
     def extend(self, items: Iterable[ItemT]) -> None:
         """For convenience, I want to be able to add many elements to my bag."""
         for item in items:
@@ -94,7 +102,7 @@ class Bag[ItemT: Hashable]:
         #         count += 1
         # return count
 
-    # Dunder methods, implementing pre-defined runtime functionality
+    # Dunder methods, implementing pre-defined runtime functionality.
 
     # Note: a side effect of using a dict internally is that iteration
     #       respects insertion order, but this is not something I promised.

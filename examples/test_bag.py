@@ -1,4 +1,5 @@
 from bag import Bag
+import collections_abc
 
 # Make a bag of fruit:
 bag = Bag(["mango", "apple", "orange", "apple", "orange", "apple"])
@@ -31,3 +32,19 @@ while True:
 
 # Make comprehensions using the bag:
 item_strs = [item.upper() for item in bag]
+
+# Checking that Bag structurally typechecks the various containers it should:
+my_iterable: collections_abc.Iterable[str] = bag  # OK
+my_iterator: collections_abc.Iterator[str] = iter(bag)  # OK
+my_sized: collections_abc.Sized = bag  # OK
+my_container: collections_abc.Container[str] = bag  # OK
+my_mutable_container: collections_abc.MutableContainer[str] = bag
+# Note: the above works without every having mentioned collections_abc in bag.py.
+
+for item_upper in collections_abc.iter_map(bag, lambda item: item.upper()):
+    #    anonymous function (lambda) definition ^^^^^^^^^^^^^^^^^^^^^^^^^
+    # Lambdas are functions defined by a single return expression.
+    print(item_upper)
+
+# Effect of Mixin implementation:
+print(f"Index of 'orange': {bag.index('orange')}")  # Index of 'orange': 2
