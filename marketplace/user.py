@@ -16,3 +16,6 @@ class Seller:
         """Create a new listing in the "draft" state."""
         uid = "dummy" # FIXME: this is just a dummy value
         return ConcreteListing.draft(self._marketplace, self, uid)
+
+class Buyer:
+    """A buyer in a marketplace."""
