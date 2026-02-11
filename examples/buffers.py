@@ -215,6 +215,8 @@ class Accessor(Reader, Writer):
         # attributes where conflicts can arise are protected ones, which you
         # can set straight by hand here.
 
+    # TODO: implement it
+
 print(f"{Accessor.__mro__ = }") # Accessor, Reader, Writer, object
 
 # Had I not defined Accessor.__init__, the lookup for Accessor.__init__ would have gone:
@@ -226,14 +228,25 @@ print(f"{Accessor.__mro__ = }") # Accessor, Reader, Writer, object
 # In this example, it would ultimately do have the same result as our Accessor.__init__,
 # but in general it is the wrong thing to do with initialisation.
 
-# class BufferedWriter(Writer):
-#     """A :class:`Writer` with buffering capabilities."""
+class BufferedWriter(Writer):
+    """A :class:`Writer` with buffering capabilities."""
+    
+    # TODO: implement it
 
-# class RandomWriter(Writer):
-#     """A :class:`Writer` with seeking capabilities."""
+class RandomWriter(Writer):
+    """A :class:`Writer` with seeking capabilities."""
 
-# class RandomAccessor(Accessor, RandomReader, RandomWriter):
-#     """An :class:`Accessor` with seeking capabilities."""
+    # TODO: implement it
 
-# class BufferedRandomAccessor(RandomAccessor, BufferedReader, BufferedWriter):
-#     """A :class:`RandomAccessor` with buffering capabilities."""
+class RandomAccessor(Accessor, RandomReader, RandomWriter):
+    """An :class:`Accessor` with seeking capabilities."""
+
+    # This will work out of the box because RandomReader and RandomWriter
+    # are really the result of a Seekable mixin added to Reader and Writer, resp.
+    # For buffering, one issue will be buffer invalidation.
+    # The other issue will be buffer syncing between read and write.
+
+class BufferedRandomAccessor(RandomAccessor, BufferedReader, BufferedWriter):
+    """A :class:`RandomAccessor` with buffering capabilities."""
+
+    # TODO: implement it
