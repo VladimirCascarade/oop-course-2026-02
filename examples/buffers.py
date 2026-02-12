@@ -16,9 +16,12 @@ In reality, the bytearray would be bytes on some (maybe slow) medium.
 # 2. Use private attributes for data which is too hard to keep consistent.
 # 3. Use initialisers (__init__) rather than constructors (__new__).
 
+from abc import ABCMeta, abstractmethod
 from collections import deque
 from collections.abc import Iterable
-from typing import Protocol, Self, overload
+from typing import Protocol, Self, overload, override
+
+from numpy import byte
 
 type Byte = int
 """Type alias for a byte, for documentation/legibility purposes."""
@@ -41,7 +44,11 @@ class ByteData(Protocol):
         The slice must be contiguous.
         """
 
-    def __setitem__(self, idx: int, value: Byte|bytes) -> None:
+    @overload
+    def __setitem__(self, idx: int, value: Byte) -> None: ... 
+    @overload
+    def __setitem__(self, idx: ContiguousSlice, value: bytes) -> None: ... 
+    def __setitem__(self, idx: int | ContiguousSlice, value: Byte|bytes) -> None:
         """
         Writes the byte/bytes starting from the given index/index slice.
         The underlying data will be extended if necessary.
@@ -94,6 +101,10 @@ class Reader:
         read = self._data[start:start+num_bytes]
         self._pos += num_bytes
         return read
+    
+    def __len__(self) -> int:
+        """The size of the underlying data."""
+        return len(self._data)
 
 
 class BufferedReader(Reader):
@@ -104,7 +115,6 @@ class BufferedReader(Reader):
     # same name attributes on a BufferedWriter without conflict (tx to name-mangling).
     __chunk_size: int
     __buffer: deque[Byte] # Not the most performant, but the simplest conceptually
-
 
     # def __new__(cls, data: ByteData, chunk_size: int) -> Self:
     #     # 1. Validation:
@@ -129,7 +139,12 @@ class BufferedReader(Reader):
         self.__chunk_size = chunk_size
         self.__buffer = deque()
 
-
+    # This is only for the sake of static typechecking, to ensure that a method
+    # by the same name exists in the superclasses. It is intended to prevent the
+    # class of bugs where one accidentally renames/refactors the parent method,
+    # and forgets about the subclass overrides.
+    # It is not necessary for overriding to actually work.
+    @override
     def read(self, num_bytes: int) -> bytes:
         # 1. Reduce num_bytes to number of bytes I can actually read from data:
         num_bytes = min(num_bytes, self.available)
@@ -140,6 +155,11 @@ class BufferedReader(Reader):
         # I am guaranteed that the buffer contains at least num_bytes, so...
         # 3. Extract bytes from buffer and return:
         return bytes(buffer.popleft() for _ in range(num_bytes))
+    
+    def invalidate_buffer(self) -> None:
+        """Clears the buffer and correctly rewinds position on underlying data."""
+        self._pos -= len(self.__buffer)
+        self.__buffer.clear()
         
     def __read_chunk(self) -> None:
         """Read a chunk of bytes from the underlying data and push them in buffer."""
@@ -148,22 +168,41 @@ class BufferedReader(Reader):
         # self.read(num_bytes) is the same as type(self).read(self, num_bytes)
         self.__buffer.extend(Reader.read(self, self.__chunk_size))
         #              class ^^^^^^      ^^^^ instance
-        
 
-class RandomReader(Reader):
-    """A :class:`Reader` with seeking capabilities."""
+class Seekable(metaclass=ABCMeta):
+    """
+    An abstract (base?) class defining the seekable behaviour.
+    It is kind of a mixin.
+    """
+    # abstract attribute (note: no initialiser)
+    _pos: int 
 
-    # No need for a constructor, this is really a mixin for readers.
-    # It automatically inherits __new__ signature from Reader.
-    # In general, the constructor of the first base class is used,
-    # because that's where the search for __new__ starts in the MRO.
+    @abstractmethod
+    def __len__(self) -> int:
+        ...
 
     def seek(self, pos: int) -> None:
-        """Sets the current reading position."""
-        if not 0 <= pos < len(self._data):
+        """Sets the current data position."""
+        if not 0 <= pos < len(self):
             raise IndexError(f"Invalid seek position {pos}")
         self._pos = pos
 
+
+
+class RandomReader(Reader, Seekable):
+    """A :class:`Reader` with seeking capabilities."""
+
+    # By listing the base classes as Reader, Seekable (as opposed to Seekable, Reader),
+    # the method resolution order (MRO) puts Reader before Seekable,
+    # which means that when looking __len__ up on an instance of RandomReader,
+    # e.g. in the first line of a call to seek(), the implementation Reader.__len__
+    # is hit first, and is the one used, shadowing/overriding the
+    # abstract method Seekable.__len__, hence implementing it without me having to
+    # explicitly implement anything in the actual subclass RandomReader.
+
+
+print(f"{RandomReader.__abstractmethods__ = }")
+# RandomReader.__abstractmethods__ = frozenset() ✔
 
 class Writer:
     """Writes bytes sequentially to a byte array."""
@@ -185,8 +224,59 @@ class Writer:
         Writes the given bytes to the underlying data starting at current position,
         which is updated to the end of the written data.
         """
-        self._data[self._pos] = data
+        self._data[self._pos:self._pos+len(data)] = data
         self._pos += len(data)
+    
+    def __len__(self) -> int:
+        """The size of the underlying data."""
+        return len(self._data)
+
+
+class BufferedWriter(Writer):
+    """A :class:`Writer` with buffering capabilities."""
+
+    __buffer: bytearray
+    __pos: int
+    # This is _BufferedWriter__pos, no conflict with _pos (it's also not the same name!)
+    # I am making an explicit point of being slightly confusing,
+    # to highlight that the point of private attributes is that we don't have to
+    # worry too much about naming conflicts.
+
+    def __init__(self, data: ByteData, buffer_size: int) -> None:
+        if buffer_size <= 0:
+            raise ValueError("Buffer size must be strictly positive.")
+        Writer.__init__(self, data)
+        self.__buffer = bytearray(buffer_size)
+        self.__pos = 0
+
+    @override
+    def write(self, data: bytes) -> None:
+        """Writes data to the buffer, automatically flushing when overfull."""
+        buffer = self.__buffer
+        buf_size = len(buffer)
+        num_bytes = len(data)
+        buf_avail = buf_size - self.__pos
+        if buf_avail >= num_bytes:
+            buffer[self.__pos:self.__pos + num_bytes] = data
+            self.__pos += len(data)
+            return
+        buffer[self.__pos:self.__pos + num_bytes] = data[:buf_avail]
+        written = buf_avail
+        while written < num_bytes:
+            # TODO: flush
+            data_chunk = data[:buf_size]
+            buffer[:len(data_chunk)] = data_chunk
+            written += len(data_chunk)
+            self.__pos = len(data_chunk)
+
+    def flush(self) -> None:
+        """Writes the bytes currently into the buffer to the underlying bytes data."""
+        Writer.write(self, self.__buffer[:self.__pos])
+        self.__pos = 0
+    
+
+class RandomWriter(Writer, Seekable):
+    """A :class:`Writer` with seeking capabilities."""
 
 
 class Accessor(Reader, Writer):
@@ -215,9 +305,29 @@ class Accessor(Reader, Writer):
         # attributes where conflicts can arise are protected ones, which you
         # can set straight by hand here.
 
-    # TODO: implement it
+    # I can read from the underlying data, write to the underlying data,
+    # pos updates are a bit weird (no seek) but nonetheless consistent,
+    # and __len__ returns the same result from Reader and Writer, so no inconsistency
+    # (The version from Reader is used, because of the MRO).
 
+# C3 linearisation (MRO) of the inheritance hierarchy above Accessor:
 print(f"{Accessor.__mro__ = }") # Accessor, Reader, Writer, object
+
+# Methods and properties are stored in the class objects (Attribute and superclasses):
+print(f"{Accessor.__init__ = }")
+# Accessor.__init__ = <function Accessor.__init__ at 0x0000011FAC42EA30>
+print(f"{Accessor.read = }")
+# Accessor.read = <function Reader.read at 0x0000011FAC42D4E0>
+print(f"{Accessor.write = }")
+# Accessor.write = <function Writer.write at 0x0000011FAC42E1F0>
+print(f"{Accessor.__len__ = }")
+# Accessor.__len__ = <function Reader.__len__ at 0x0000011FAC42D640>
+# Note: The version from Reader is used because Reader comes first in the MRO
+
+# Attributes are stored on instances of Accessor:
+accessor = Accessor(bytearray(5))
+print(f"{accessor.__dict__ = }")
+# {'_data': bytearray(b'\x00\x00\x00\x00\x00'), '_pos': 0}
 
 # Had I not defined Accessor.__init__, the lookup for Accessor.__init__ would have gone:
 # Accessor, Reader, Writer, object
@@ -228,25 +338,54 @@ print(f"{Accessor.__mro__ = }") # Accessor, Reader, Writer, object
 # In this example, it would ultimately do have the same result as our Accessor.__init__,
 # but in general it is the wrong thing to do with initialisation.
 
-class BufferedWriter(Writer):
-    """A :class:`Writer` with buffering capabilities."""
-    
-    # TODO: implement it
 
-class RandomWriter(Writer):
-    """A :class:`Writer` with seeking capabilities."""
-
-    # TODO: implement it
-
-class RandomAccessor(Accessor, RandomReader, RandomWriter):
+class RandomAccessor(RandomReader, RandomWriter, Accessor):
     """An :class:`Accessor` with seeking capabilities."""
 
-    # This will work out of the box because RandomReader and RandomWriter
-    # are really the result of a Seekable mixin added to Reader and Writer, resp.
-    # For buffering, one issue will be buffer invalidation.
-    # The other issue will be buffer syncing between read and write.
+print(f"{RandomAccessor.__len__ = }")
+# RandomAccessor.__len__ = <function Reader.__len__ at 0x000001BC7FD2D640>
+print(f"{RandomAccessor.__abstractmethods__ = }") # frozenset()
+# Indeed, let's look at the MRO of RandomAccessor:
+print(f"{RandomAccessor.__mro__}")
+# C3 linearisation of the inheritance hierarchy for RandomAccessor:
+#                                                                       Seekable:
+#                                             Accessor: Reader, Writer,
+#                               RandomWriter:                   Writer, Seekable,
+#                 RandomReader:                         Reader,         Seekable,
+# RandomAccessor: RandomReader, RandomWriter, Accessor,
+# --------------------------------------------------------------------------------------
+# RandomAccessor, RandomReader, RandomWriter, Accessor, Reader, Writer, Seekable, object
+#            seek ^^^^^^^^^^^^
+#                                    __init__ ^^^^^^^^
+#                                                  read ^^^^^^
+#                                               __len__ ^^^^^^
+#                                             available ^^^^^^
+#                                                         write ^^^^^^
 
 class BufferedRandomAccessor(RandomAccessor, BufferedReader, BufferedWriter):
     """A :class:`RandomAccessor` with buffering capabilities."""
 
-    # TODO: implement it
+    @override
+    def write(self, data: bytes) -> None:
+        self.invalidate_buffer() # BufferedReader.invalidate_buffer(self)
+        RandomAccessor.write(self, data) # Writer.write(self, data)
+
+    @override
+    def read(self, num_bytes: int) -> bytes:
+        self.flush() # BufferedWriter.flush(self)
+        return RandomAccessor.read(self, num_bytes) # Reader.read(self, num_bytes)
+
+print(f"{BufferedRandomAccessor.__mro__ = }")
+# C3 linearisation of the inheritance hierarchy for BufferedRandomAccessor,
+# this time using the full MROs for the three base classes, for conciseness:
+#                                                                                                       BufferedWriter                                                Writer            object
+#                                                                               BufferedReader                                                        Reader                    object
+#                         RandomAccessor, RandomReader, RandomWriter, Accessor, BufferedReader, Reader, BufferedWriter, Writer, Seekable, object
+# ----------------------------------------------------------------------------------------------------------------------------------------------
+# BufferedRandomAccessor, RandomAccessor, RandomReader, RandomWriter, Accessor, BufferedReader, Reader, BufferedWriter, Writer, Seekable, object
+# ^^^^^^^^^^^^^^^^^^^^^^ read
+# ^^^^^^^^^^^^^^^^^^^^^^ write
+#                                                            __init__ ^^^^^^^^
+#                                                                           seek ^^^^^^^^^^^^
+#                                                                                       __len__ ^^^^^^
+#                                                                                     available ^^^^^^
