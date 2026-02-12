@@ -3,6 +3,8 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Concatenate, Literal, ParamSpec, Protocol, Self, TypeVar, TypedDict, Unpack, cast, final
 
+from .events import EventManager, Event
+
 if TYPE_CHECKING:
     from .user import Seller
     from .marketplace import Marketplace
@@ -30,6 +32,15 @@ class BaseListing(Protocol):
     def clone(self, seller: Seller) -> DraftListing: ...
 
     def snapshot(self) -> ListingData: ...
+
+    @property
+    def on_activate(self) -> Event[ActiveListing]: ...
+
+    @property
+    def on_sell(self) -> Event[SoldListing]: ...
+    
+    @property
+    def on_cancel(self) -> Event[CancelledListing]: ...
 
 class IncompleteListing(BaseListing, Protocol):
     """A listing in any state."""
@@ -193,17 +204,21 @@ def in_state(*states: ListingState) -> ListingMethodDecorator:
         return inner
     return decorator
 
+
+type ListingUID = str
+"""Type alias for documentation purposes."""
+
 @final # concrete implementation of Listing, for internal use
 class ConcreteListing:
     """A listing in a marketplace."""
 
     _marketplace: Marketplace
     _seller: Seller
-    _uid: str
+    _uid: ListingUID
     _state: ListingState
     _data: ListingData
 
-    def __new__(cls, marketplace: Marketplace, seller: Seller, uid: str) -> Self:
+    def __new__(cls, marketplace: Marketplace, seller: Seller, uid: sListingUIDtr) -> Self:
         # TODO: ensure that the listing is being constructed legally.
         #       Possible options:
         #       - Notify the marketplace via some callback method.
@@ -215,14 +230,22 @@ class ConcreteListing:
         self._seller = seller
         self._uid = uid
         self._data = {}
+        self._on_activate = EventManager()
+        self._on_sell = EventManager()
+        self._on_cancel = EventManager()
         return self
 
     @staticmethod
-    def draft(marketplace: Marketplace, seller: Seller, uid: str) -> DraftListing:
+    def draft(marketplace: Marketplace, seller: Seller, uid: ListingUID) -> DraftListing:
         """Create a new listing in the "draft" state."""
         return cast(DraftListing, ConcreteListing(marketplace, seller, uid))
         #      ^^^^^^^^^^^^^^^^^ directs the static typechecker to accept the type
         # Aka: I know better than you, trust me.
+
+    @property
+    def as_listing(self) -> Listing:
+        """A utility property to return a ConcreteListing as a Listing."""
+        return cast(Listing, self)
 
     # Read-only properties:
 
@@ -237,7 +260,7 @@ class ConcreteListing:
         return self._seller
 
     @property
-    def uid(self) -> str:
+    def uid(self) -> ListingUID:
         """The unique identifier for this listing."""
         return self._uid
 
@@ -351,16 +374,49 @@ class ConcreteListing:
     def activate(self) -> ActiveListing:
         """Activate this listing."""
         self._state = "active"
-        return cast(ActiveListing, self)
+        listing = cast(ActiveListing, self)
+        self._on_activate.trigger(listing) # pubsub pattern in action!
+        self._on_activate.clear() # activate can never be triggered again
+        return listing
     
     @in_state("draft", "active")
     def cancel(self) -> CancelledListing:
         """Cancel this listing."""
         self._state = "cancelled"
-        return cast(CancelledListing, self)
-    
+        listing = cast(CancelledListing, self)
+        self._on_cancel.trigger(listing) # pubsub pattern in action!
+        self._on_activate.clear() # activate can never be triggered again
+        self._on_sell.clear() # sell can never be triggered again
+        self._on_cancel.clear() # cancel can never be triggered again
+        return listing
+
     @in_state("active")
     def sell(self) -> SoldListing:
         """Sell this listing."""
         self._state = "sold"
-        return cast(SoldListing, self)
+        listing = cast(SoldListing, self)
+        self._on_sell.trigger(listing) # pubsub pattern in action!
+        self._on_activate.clear() # activate can never be triggered again
+        self._on_sell.clear() # sell can never be triggered again
+        self._on_cancel.clear() # cancel can never be triggered again
+        return listing
+
+    # PubSub pattern implementation:
+
+    _on_activate: EventManager[ActiveListing]
+
+    @property
+    def on_activate(self) -> Event[ActiveListing]:
+        return self._on_activate
+
+    _on_sell: EventManager[SoldListing]
+
+    @property
+    def on_sell(self) -> Event[SoldListing]:
+        return self._on_sell
+    
+    _on_cancel: EventManager[CancelledListing]
+
+    @property
+    def on_cancel(self) -> Event[CancelledListing]:
+        return self._on_cancel
